@@ -7,6 +7,8 @@
 #include "model/Profile.h"
 
 #include <QDBusMetaType>
+#include <QFile>
+#include <QTimer>
 #include <QVariant>
 
 namespace netifrcd
@@ -41,6 +43,20 @@ void ensureDeviceStateReasonRegistered()
         return true;
     }();
     Q_UNUSED(once);
+}
+
+/// One of the kernel's per-interface counters. NetworkManager reports the same numbers
+/// over netlink; reading them from sysfs keeps this independent of netifrc, which has
+/// no notion of byte counters at all. A missing file (interface gone) reads as zero.
+qulonglong readInterfaceCounter(const QString &ifname, const char *counter)
+{
+    QFile file(QStringLiteral("/sys/class/net/%1/statistics/%2").arg(ifname, QLatin1String(counter)));
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        return 0;
+    }
+    bool ok = false;
+    const qulonglong value = file.readAll().trimmed().toULongLong(&ok);
+    return ok ? value : 0;
 }
 
 } // namespace
@@ -90,6 +106,10 @@ DeviceObject::DeviceObject(Backend *backend, const QString &ifname, QObject *par
     } else if (record.info.deviceType == NM_DEVICE_TYPE_ETHERNET) {
         new DeviceWiredAdaptor(m_backend, m_ifname, this);
     }
+
+    // NetworkManager exports Device.Statistics on every device, not just the ones with
+    // a type-specific interface, so this is unconditional.
+    new DeviceStatisticsAdaptor(m_backend, m_ifname, this);
 
     qCDebug(NETIFRC) << "DeviceObject" << ifname << "deviceType" << record.info.deviceType << "adaptors"
                      << findChildren<QDBusAbstractAdaptor *>().size();
@@ -522,6 +542,75 @@ QVariantMap DeviceWirelessAdaptor::changedMap(const QStringList &props) const
         }
     }
     return changed;
+}
+
+// ---------------------------------------------------------------------------
+// DeviceStatisticsAdaptor
+// ---------------------------------------------------------------------------
+
+DeviceStatisticsAdaptor::DeviceStatisticsAdaptor(Backend *backend, const QString &ifname, QObject *parent)
+    : QDBusAbstractAdaptor(parent)
+    , m_ifname(ifname)
+    , m_path(backend->devicePathFor(ifname))
+    , m_timer(new QTimer(this))
+    // Seeded with the current counters so the first poll only announces real movement.
+    , m_lastRx(readInterfaceCounter(ifname, "rx_bytes"))
+    , m_lastTx(readInterfaceCounter(ifname, "tx_bytes"))
+{
+    m_timer->setTimerType(Qt::CoarseTimer);
+    connect(m_timer, &QTimer::timeout, this, &DeviceStatisticsAdaptor::poll);
+}
+
+uint DeviceStatisticsAdaptor::refreshRateMs() const
+{
+    return m_refreshRateMs;
+}
+
+void DeviceStatisticsAdaptor::setRefreshRateMs(uint refreshRate)
+{
+    if (m_refreshRateMs == refreshRate) {
+        return;
+    }
+    m_refreshRateMs = refreshRate;
+
+    if (refreshRate == 0) {
+        m_timer->stop();
+    } else {
+        m_timer->start(static_cast<int>(refreshRate));
+    }
+
+    QVariantMap changed;
+    changed.insert(QStringLiteral("RefreshRateMs"), refreshRate);
+    ObjectBase::sendPropertiesChanged(m_path, QLatin1String(IfaceDeviceStatistics), changed);
+}
+
+qulonglong DeviceStatisticsAdaptor::rxBytes() const
+{
+    return readInterfaceCounter(m_ifname, "rx_bytes");
+}
+
+qulonglong DeviceStatisticsAdaptor::txBytes() const
+{
+    return readInterfaceCounter(m_ifname, "tx_bytes");
+}
+
+void DeviceStatisticsAdaptor::poll()
+{
+    const qulonglong rx = rxBytes();
+    const qulonglong tx = txBytes();
+
+    QVariantMap changed;
+    if (rx != m_lastRx) {
+        m_lastRx = rx;
+        changed.insert(QStringLiteral("RxBytes"), rx);
+    }
+    if (tx != m_lastTx) {
+        m_lastTx = tx;
+        changed.insert(QStringLiteral("TxBytes"), tx);
+    }
+    if (!changed.isEmpty()) {
+        ObjectBase::sendPropertiesChanged(m_path, QLatin1String(IfaceDeviceStatistics), changed);
+    }
 }
 
 } // namespace netifrcd

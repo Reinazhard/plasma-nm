@@ -3,8 +3,8 @@
 // org.freedesktop.NetworkManager.Device and its type-specific interfaces.
 //
 // The generic Device interface lives on DeviceObject itself. The per-type
-// interfaces (Wired / Wireless) are QDBusAbstractAdaptor children, which is the
-// only way Qt lets one object expose several D-Bus interfaces. registerObject()
+// interfaces (Wired / Wireless / Statistics) are QDBusAbstractAdaptor children, which
+// is the only way Qt lets one object expose several D-Bus interfaces. registerObject()
 // picks the adaptors up automatically when Backend registers the DeviceObject.
 
 #pragma once
@@ -20,6 +20,10 @@
 #include <QString>
 #include <QStringList>
 #include <QVariantMap>
+
+// At global scope: a forward declaration inside namespace netifrcd below would name a
+// different type and leave the real QTimer incomplete.
+class QTimer;
 
 namespace netifrcd
 {
@@ -207,6 +211,47 @@ private:
     QString m_ifname;
     QString m_path;
     QStringList m_knownAccessPoints;
+};
+
+// ---------------------------------------------------------------------------
+// org.freedesktop.NetworkManager.Device.Statistics
+// ---------------------------------------------------------------------------
+//
+// NetworkManager implements this on the device object itself - there is no separate
+// "Statistics" object-path property to follow - so it is an adaptor on DeviceObject
+// rather than an object of its own.
+//
+// RefreshRateMs is the polling period the client asks for; NetworkManager only
+// guarantees refreshes at that rate "in case the underlying counter has changed too",
+// which is why poll() stays silent while the counters are unchanged. A rate of zero
+// means no guaranteed refresh at all, so the timer is simply not run.
+
+class DeviceStatisticsAdaptor : public QDBusAbstractAdaptor
+{
+    Q_OBJECT
+    Q_CLASSINFO("D-Bus Interface", "org.freedesktop.NetworkManager.Device.Statistics")
+
+    Q_PROPERTY(uint RefreshRateMs READ refreshRateMs WRITE setRefreshRateMs)
+    Q_PROPERTY(qulonglong RxBytes READ rxBytes)
+    Q_PROPERTY(qulonglong TxBytes READ txBytes)
+
+public:
+    DeviceStatisticsAdaptor(Backend *backend, const QString &ifname, QObject *parent);
+
+    uint refreshRateMs() const;
+    void setRefreshRateMs(uint refreshRate);
+    qulonglong rxBytes() const;
+    qulonglong txBytes() const;
+
+private:
+    void poll();
+
+    QString m_ifname;
+    QString m_path;
+    QTimer *m_timer = nullptr;
+    uint m_refreshRateMs = 0;
+    qulonglong m_lastRx = 0; // last value announced, so poll() only speaks on a change
+    qulonglong m_lastTx = 0;
 };
 
 } // namespace netifrcd
