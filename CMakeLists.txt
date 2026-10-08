@@ -122,6 +122,16 @@ add_subdirectory(kcms)
 add_subdirectory(libs)
 add_subdirectory(vpn)
 
+# netifrcd is a NetworkManager-compatible D-Bus daemon backed by netifrc that lives in
+# this tree as a standalone project. It is OFF by default so an ordinary plasma-nm build
+# is unaffected; CI turns it on (see .kde-ci.yml) so its CTest unit tests run alongside
+# plasma-nm's. It needs no dependency plasma-nm does not already have: libnm is required
+# above for NETWORKMANAGER, and it only adds Qt6::Test, which tests/ already requires.
+option(BUILD_NETIFRCD "Build netifrcd, the netifrc-backed NetworkManager-compatible daemon" OFF)
+if (BUILD_NETIFRCD)
+    add_subdirectory(netifrcd)
+endif()
+
 # Enable unit testing
 if (BUILD_TESTING)
     add_subdirectory(tests)

@@ -1,0 +1,50 @@
+#!/usr/bin/openrc-run
+# shellcheck shell=sh disable=SC1008
+#
+# OpenRC service script for netifrcd - a NetworkManager-compatible D-Bus daemon
+# backed by netifrc (/etc/conf.d/net + /etc/init.d/net.*).
+#
+# netifrcd reimplements the org.freedesktop.NetworkManager D-Bus API on the
+# system bus so unmodified NetworkManager clients (notably the KDE Plasma
+# applet) keep working on a netifrc/OpenRC system.
+#
+# Enable it in place of NetworkManager:
+#
+#     rc-update add netifrcd default
+#     rc-update del NetworkManager default
+#
+# The two services claim the same bus name, so they must not run at the same
+# time. start_pre() below refuses to start if NetworkManager is already up.
+
+# shellcheck disable=SC2034
+description="NetworkManager-compatible D-Bus daemon backed by netifrc"
+
+command="/usr/bin/netifrcd"
+command_background="yes"
+pidfile="/run/netifrcd.pid"
+
+depend()
+{
+	need dbus localmount
+	after bootmisc
+	use net.lo
+	provide net
+	keyword -jail -prefix -vserver
+}
+
+start_pre()
+{
+	# NetworkManager and netifrcd both claim org.freedesktop.NetworkManager on
+	# the system bus; only one process can own the name. Refuse to start while
+	# NetworkManager is running so the failure is explicit and early.
+	if service_started NetworkManager; then
+		eerror "NetworkManager is running and owns org.freedesktop.NetworkManager."
+		eerror "Stop and disable it before starting netifrcd:"
+		eerror "    rc-service NetworkManager stop"
+		eerror "    rc-update del NetworkManager default"
+		return 1
+	fi
+
+	# Make sure the directory for our pidfile exists.
+	checkpath --directory --mode 0755 /run
+}

@@ -34,6 +34,6 @@ Dependencies:
     'plasma/libplasma': '@same'
 Options:
  require-passing-tests-on: ['@all']
- cmake-options: ' -DBUILD_MOBILE=ON'
+ cmake-options: ' -DBUILD_MOBILE=ON -DBUILD_NETIFRCD=ON'
  run-qmllint: true
  enable-lsan: True

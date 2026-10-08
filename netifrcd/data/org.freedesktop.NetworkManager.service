@@ -1,0 +1,18 @@
+# D-Bus system-bus activation file for netifrcd.
+#
+# netifrcd implements the org.freedesktop.NetworkManager D-Bus API, so it is
+# activated by the same well-known name as NetworkManager. This file lives next
+# to NetworkManager's own activation file, if any, in
+# /usr/share/dbus-1/system-services/.
+#
+# NOTE: this races with NetworkManager's own activation file - if both are
+# installed, the bus may spawn whichever it finds first, and only one process
+# can own the name. It is therefore intended mainly for systems WITHOUT
+# NetworkManager installed, where netifrcd is the only provider of the name.
+# On a system that has NetworkManager, prefer starting netifrcd through OpenRC
+# (rc-service netifrcd start) and remove NetworkManager's activation file.
+
+[D-BUS Service]
+Name=org.freedesktop.NetworkManager
+Exec=/usr/bin/netifrcd --bus-activated
+User=root
